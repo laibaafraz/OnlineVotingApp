@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(db)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Users: self-register as 'user' only; role can never be changed by the client.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'user';
+      allow update, delete: if false;
+    }
+
+    // Polls: admin manages; voters may only bump `counts` alongside their own vote doc.
+    match /polls/{pid} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (signedIn()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['counts'])
+            && existsAfter(/databases/$(db)/documents/votes/$(pid + '_' + request.auth.uid)));
+    }
+
+    // Votes: id = pollId_uid => one vote per user per poll. Immutable, only inside the time window.
+    match /votes/{vid} {
+      allow read: if signedIn() && (vid.matches('.*_' + request.auth.uid) || isAdmin());
+      allow create: if signedIn()
+        && vid == request.resource.data.pollId + '_' + request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.time >= get(/databases/$(db)/documents/polls/$(request.resource.data.pollId)).data.startAt
+        && request.time <= get(/databases/$(db)/documents/polls/$(request.resource.data.pollId)).data.endAt
+        && get(/databases/$(db)/documents/polls/$(request.resource.data.pollId)).data.closed == false;
+      allow update, delete: if false;
+    }
+
+    // Activity log: users append their own events, only admins read.
+    match /activity/{id} {
+      allow read: if isAdmin();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}
