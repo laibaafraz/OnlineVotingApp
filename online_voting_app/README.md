@@ -114,6 +114,4 @@ android/
 - Email verification
 
 ## Author
-
-**Your Name**
-[LinkedIn](https://linkedin.com/in/your-profile) · [GitHub](https://github.com/your-username)
+laibaafraz
